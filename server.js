@@ -52,8 +52,9 @@ const userSchema = new mongoose.Schema({
 const User = mongoose.model('User', userSchema);
 
 const app = express();
-// Security headers
-app.use(helmet());
+// Security headers: keep helmet protections but disable default CSP because
+// the frontend uses inline scripts and CDN-loaded assets in development.
+app.use(helmet({ contentSecurityPolicy: false }));
 
 // Trust proxy so secure cookies and rate-limiting work behind proxies (Render, Vercel)
 if (process.env.NODE_ENV === 'production') {
@@ -112,6 +113,11 @@ const createToken = (user) => {
 
 const authenticate = (req, res, next) => {
   const token = (req.cookies && req.cookies.token) || (req.headers.authorization && req.headers.authorization.split(' ')[1]);
+  if (process.env.NODE_ENV !== 'production') {
+    try {
+      console.log('[/api] authenticate middleware - incoming Cookie header:', req.headers.cookie);
+    } catch (e) {}
+  }
   if (!token) return res.status(401).json({ error: 'Not authenticated' });
   try {
     req.user = jwt.verify(token, JWT_SECRET);
@@ -171,6 +177,17 @@ app.post('/api/auth/login', async (req, res) => {
       sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax',
       maxAge: 7 * 24 * 60 * 60 * 1000
     });
+    // Development logging: print request origin/identifier and the Set-Cookie header
+    if (process.env.NODE_ENV !== 'production') {
+      try {
+        console.log('[/api/auth/login] login successful for identifier:', trimmed);
+        console.log('[/api/auth/login] request origin:', req.headers.origin || req.headers.referer || req.ip);
+        const setCookieHeader = res.getHeader && res.getHeader('Set-Cookie');
+        console.log('[/api/auth/login] Set-Cookie header:', setCookieHeader);
+      } catch (e) {
+        console.error('[/api/auth/login] logging failed', e);
+      }
+    }
     return res.json({ user: { id: user._id, username: user.username, email: user.email, role: user.role, balance: user.balance, plan: user.plan } });
   } catch (error) {
     console.error('Login error', error);
